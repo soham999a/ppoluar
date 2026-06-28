@@ -51,6 +51,10 @@ const quotations = [
 
 test.describe("Seed database with sample data", () => {
   test("sign in and populate companies, bills, payments, quotations", async ({ page }) => {
+    test.setTimeout(180000)
+
+    // Mobile viewport so company cards (which are links) are visible
+    await page.setViewportSize({ width: 390, height: 844 })
     // 1. Sign in
     await page.goto("/")
     await page.fill('input[placeholder="Email"]', EMAIL)
@@ -82,7 +86,7 @@ test.describe("Seed database with sample data", () => {
       await page.waitForTimeout(1500)
 
       // Verify company appears in list
-      await expect(page.locator(`text=${company.name}`).first()).toBeVisible()
+      await expect(page.locator(`a:has-text("${company.name}")`).first()).toBeVisible()
       console.log(`✓ Added company: ${company.name}`)
     }
 
@@ -131,7 +135,7 @@ test.describe("Seed database with sample data", () => {
             await page.waitForTimeout(500)
 
             await page.fill('input[placeholder="Cash, Bank Transfer, etc."]', payment.mode)
-            const paymentDateInput = page.locator('input[type="date"]').nth(1)
+            const paymentDateInput = page.locator('input[type="date"]').first()
             await paymentDateInput.fill(payment.date)
             await page.fill('input[placeholder="Bank account name"]', payment.account)
             await page.fill('input[placeholder="Amount"]', payment.amount)
@@ -169,7 +173,7 @@ test.describe("Seed database with sample data", () => {
     await page.waitForTimeout(2000)
     console.log("✅ Seeding complete! Dashboard should show populated stats.")
 
-    // Final confirmation
-    await expect(page.locator("text=Companies").first()).toBeVisible()
+    // Final confirmation - check dashboard h1
+    await expect(page.locator("h1:has-text('Dashboard')")).toBeVisible()
   })
 })
