@@ -2,12 +2,14 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { FcGoogle } from "react-icons/fc"
 
 export default function LandingPage() {
-  const { user, loading, signInWithGoogle } = useAuth()
+  const { user, loading, signInWithGoogle, signInWithEmail } = useAuth()
   const router = useRouter()
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
 
   useEffect(() => {
     if (!loading && user) {
@@ -48,6 +50,36 @@ export default function LandingPage() {
             <FcGoogle size={22} />
             Sign in with Google
           </button>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200" /></div>
+            <div className="relative flex justify-center text-xs"><span className="bg-white px-3 text-slate-400">or sign in with email</span></div>
+          </div>
+
+          <form onSubmit={(e) => { e.preventDefault(); signInWithEmail(email, password) }} className="space-y-3">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email"
+              className="w-full border border-slate-200 rounded-xl px-4 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+              required
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              className="w-full border border-slate-200 rounded-xl px-4 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+              required
+            />
+            <button
+              type="submit"
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-3.5 lg:py-3 px-4 rounded-xl transition-colors active:scale-[0.98] text-sm"
+            >
+              Sign in
+            </button>
+          </form>
 
           <p className="text-[11px] lg:text-xs text-slate-400 mt-6">
             By signing in, you agree to our terms and privacy policy.
