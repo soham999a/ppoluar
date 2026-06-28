@@ -127,7 +127,7 @@ test.describe("Seed database with sample data", () => {
         const billPayments = payments[i]
         if (billPayments && billPayments.length > 0) {
           // Expand bill to see payments
-          await page.click(`button:has-text("${bill.billNumber}")`)
+          await page.locator(`text="${bill.billNumber}"`).first().click()
           await page.waitForTimeout(500)
 
           for (const payment of billPayments) {

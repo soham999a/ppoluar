@@ -327,9 +327,9 @@ export default function CompanyDetailPage() {
           </div>
         )}
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {bills.length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+            <div className="col-span-full bg-white rounded-2xl border border-slate-200 p-8 text-center">
               <p className="text-sm text-slate-400">No bills yet. Add one to get started.</p>
             </div>
           ) : (
@@ -340,70 +340,78 @@ export default function CompanyDetailPage() {
               const isExpanded = expandedBills[bill.id]
 
               return (
-                <div key={bill.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div key={bill.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
                   <div
                     role="button"
                     tabIndex={0}
                     onClick={() => toggleBill(bill.id)}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") toggleBill(bill.id) }}
-                    className="w-full flex items-center justify-between p-4 active:bg-slate-50 transition-colors text-left cursor-pointer"
+                    className="cursor-pointer"
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {isExpanded ? <FiChevronDown className="text-slate-300 shrink-0" size={18} /> : <FiChevronRight className="text-slate-300 shrink-0" size={18} />}
-                      <div className="min-w-0">
-                        <span className="font-medium text-slate-900 text-sm lg:text-base">{bill.billNumber || "Bill #" + bill.id.slice(0, 6)}</span>
-                        <span className={`ml-2 text-[11px] lg:text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${
+                    <div className="p-5 pb-3">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          {isExpanded ? <FiChevronDown className="text-slate-300 shrink-0 mt-0.5" size={16} /> : <FiChevronRight className="text-slate-300 shrink-0 mt-0.5" size={16} />}
+                          <div className="min-w-0">
+                            <span className="font-bold text-lg text-slate-900">{bill.billNumber || "Bill #" + bill.id.slice(0, 6)}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          <span className="text-xl font-bold text-slate-800">₹{billAmt.toLocaleString()}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openEditBill(bill) }}
+                            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                          >
+                            <FiEdit2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
+                        {bill.invoiceNumber && (
+                          <div className="bg-slate-50 rounded-xl p-3 col-span-1">
+                            <span className="text-[10px] text-slate-400 block uppercase tracking-wide mb-0.5">Invoice</span>
+                            <span className="text-sm font-medium text-slate-900 break-all">{bill.invoiceNumber}</span>
+                          </div>
+                        )}
+                        {bill.loadingDate && (
+                          <div className="bg-slate-50 rounded-xl p-3 col-span-1">
+                            <span className="text-[10px] text-slate-400 block uppercase tracking-wide mb-0.5">Loading</span>
+                            <span className="text-sm font-medium text-slate-900">{bill.loadingDate}</span>
+                          </div>
+                        )}
+                        {bill.trucks && (
+                          <div className="bg-slate-50 rounded-xl p-3 col-span-1">
+                            <span className="text-[10px] text-slate-400 block uppercase tracking-wide mb-0.5">Trucks</span>
+                            <span className="text-sm font-medium text-slate-900">{bill.trucks}</span>
+                          </div>
+                        )}
+                        {bill.goods && (
+                          <div className="bg-slate-50 rounded-xl p-3 col-span-1">
+                            <span className="text-[10px] text-slate-400 block uppercase tracking-wide mb-0.5">Goods</span>
+                            <span className="text-sm font-medium text-slate-900">{bill.goods}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
                           bill.status === "Paid" ? "bg-green-100 text-green-700" :
                           bill.status === "Partial Paid" ? "bg-yellow-100 text-yellow-700" :
                           "bg-red-100 text-red-700"
                         }`}>{bill.status}</span>
+                        <span className="text-xs text-slate-400">
+                          Paid: <span className="font-medium text-slate-600">₹{paidAmt.toLocaleString()}</span>
+                        </span>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 lg:gap-3 shrink-0 ml-2">
-                      <span className="text-sm lg:text-base font-semibold text-slate-700">₹{billAmt.toLocaleString()}</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); openEditBill(bill) }}
-                        className="p-2 lg:p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors active:scale-90"
-                      >
-                        <FiEdit2 size={14} />
-                      </button>
                     </div>
                   </div>
 
                   {isExpanded && (
                     <div className="border-t border-slate-100 animate-fade-in">
-                      <div className="p-4 grid grid-cols-2 gap-3 text-sm bg-slate-50">
-                        {bill.invoiceNumber && (
-                          <div className="bg-white rounded-lg p-2.5">
-                            <span className="text-[11px] text-slate-400 block uppercase tracking-wide">Invoice</span>
-                            <span className="text-slate-900 font-medium">{bill.invoiceNumber}</span>
-                          </div>
-                        )}
-                        {bill.loadingDate && (
-                          <div className="bg-white rounded-lg p-2.5">
-                            <span className="text-[11px] text-slate-400 block uppercase tracking-wide">Loading</span>
-                            <span className="text-slate-900 font-medium">{bill.loadingDate}</span>
-                          </div>
-                        )}
-                        {bill.trucks && (
-                          <div className="bg-white rounded-lg p-2.5">
-                            <span className="text-[11px] text-slate-400 block uppercase tracking-wide">Trucks</span>
-                            <span className="text-slate-900 font-medium">{bill.trucks}</span>
-                          </div>
-                        )}
-                        {bill.goods && (
-                          <div className="bg-white rounded-lg p-2.5">
-                            <span className="text-[11px] text-slate-400 block uppercase tracking-wide">Goods</span>
-                            <span className="text-slate-900 font-medium">{bill.goods}</span>
-                          </div>
-                        )}
-                      </div>
-
                       <div className="p-4">
                         <div className="flex items-center justify-between mb-3">
-                          <h4 className="text-sm font-semibold text-slate-700">
-                            Payments <span className="text-slate-400 font-normal">(₹{paidAmt.toLocaleString()} / ₹{billAmt.toLocaleString()})</span>
-                          </h4>
+                          <h4 className="text-sm font-semibold text-slate-700">Payments</h4>
                           <button
                             onClick={() => { resetPaymentForm(); setShowPaymentForm(bill.id) }}
                             className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium active:scale-95"

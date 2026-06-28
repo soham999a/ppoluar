@@ -8,7 +8,7 @@ import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
 import PullToRefresh from "@/components/PullToRefresh"
 import Link from "next/link"
-import { FiPlus, FiChevronRight, FiX } from "react-icons/fi"
+import { FiPlus, FiChevronRight, FiX, FiTruck, FiUsers, FiMail, FiPhone } from "react-icons/fi"
 
 interface Company {
   id: string
@@ -70,19 +70,16 @@ export default function CompaniesPage() {
       <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0 animate-fade-in">
           <div className="h-7 bg-slate-100 rounded w-32 mb-1 animate-pulse" />
           <div className="h-4 bg-slate-100 rounded w-64 mb-6 animate-pulse" />
-          <div className="hidden lg:block bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="p-4 space-y-3">
-              {[1, 2, 3].map((i) => <div key={i} className="h-12 bg-slate-50 rounded animate-pulse" />)}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="bg-white rounded-2xl border border-slate-200 p-5 animate-pulse">
+                  <div className="h-10 w-10 bg-slate-100 rounded-xl mb-4" />
+                  <div className="h-5 bg-slate-100 rounded w-3/4 mb-2" />
+                  <div className="h-3 bg-slate-100 rounded w-1/2 mb-1" />
+                  <div className="h-3 bg-slate-100 rounded w-2/3" />
+                </div>
+              ))}
             </div>
-          </div>
-          <div className="block lg:hidden space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 animate-pulse">
-                <div className="h-4 bg-slate-100 rounded w-40 mb-2" />
-                <div className="h-3 bg-slate-50 rounded w-24" />
-              </div>
-            ))}
-          </div>
         </main>
       </div>
     )
@@ -152,67 +149,50 @@ export default function CompaniesPage() {
           </div>
         )}
 
-        <div className="hidden lg:block bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="text-left py-3 px-4 font-medium text-slate-500 text-xs uppercase tracking-wide">Name</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-500 text-xs uppercase tracking-wide">GST</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-500 text-xs uppercase tracking-wide">Contact</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-500 text-xs uppercase tracking-wide">Email</th>
-                  <th className="text-left py-3 px-4 font-medium text-slate-500 text-xs uppercase tracking-wide">Number</th>
-                  <th className="text-center py-3 px-4 font-medium text-slate-500 text-xs uppercase tracking-wide">Open</th>
-                </tr>
-              </thead>
-              <tbody>
-                {companies.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-8 text-slate-400">No companies yet. Click &ldquo;Add company&rdquo; to create your first one.</td></tr>
-                ) : (
-                  companies.map((c) => (
-                    <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                      <td className="py-3 px-4 font-medium text-slate-900">{c.name}</td>
-                      <td className="py-3 px-4 text-slate-600">{c.gst || "—"}</td>
-                      <td className="py-3 px-4 text-slate-600">{c.contact || "—"}</td>
-                      <td className="py-3 px-4 text-slate-600">{c.email || "—"}</td>
-                      <td className="py-3 px-4 text-slate-600">{c.number || "—"}</td>
-                      <td className="py-3 px-4 text-center">
-                        <Link href={`/companies/${c.id}`} className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-slate-200 transition-colors text-slate-500"><FiChevronRight size={18} /></Link>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {companies.length === 0 ? (
+            <div className="col-span-full bg-white rounded-2xl border border-slate-200 p-8 text-center">
+              <p className="text-sm text-slate-400">No companies yet. Click &ldquo;Add company&rdquo; to create your first one.</p>
+            </div>
+          ) : (
+            companies.map((c) => (
+              <Link
+                key={c.id}
+                href={`/companies/${c.id}`}
+                className="block bg-white rounded-2xl border border-slate-200 p-5 hover:-translate-y-1 hover:shadow-lg transition-all duration-200 active:scale-[0.98]"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="h-10 w-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500">
+                    <FiTruck size={20} />
+                  </div>
+                  <FiChevronRight className="text-slate-300 mt-1 shrink-0" size={16} />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-1 truncate">{c.name}</h3>
+                {c.gst && <p className="text-sm text-slate-400 mb-3">GST: {c.gst}</p>}
+                <div className="space-y-1.5">
+                  {c.contact && (
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <FiUsers size={14} className="shrink-0" />
+                      <span className="truncate">{c.contact}</span>
+                    </div>
+                  )}
+                  {c.email && (
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <FiMail size={14} className="shrink-0" />
+                      <span className="truncate">{c.email}</span>
+                    </div>
+                  )}
+                  {c.number && (
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <FiPhone size={14} className="shrink-0" />
+                      <span>{c.number}</span>
+                    </div>
+                  )}
+                </div>
+              </Link>
+            ))
+          )}
         </div>
-
-        <div className="block lg:hidden space-y-3">
-            {companies.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
-                <p className="text-sm text-slate-400">No companies yet. Tap &ldquo;+&rdquo; to add one.</p>
-              </div>
-            ) : (
-              companies.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/companies/${c.id}`}
-                  className="block bg-white rounded-xl shadow-sm border border-slate-200 p-4 active:bg-slate-50 transition-colors"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-semibold text-slate-900 text-base">{c.name}</h3>
-                    <FiChevronRight className="text-slate-300 shrink-0" size={18} />
-                  </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                    {c.gst && <span>GST: {c.gst}</span>}
-                    {c.contact && <span>{c.contact}</span>}
-                    {c.email && <span>{c.email}</span>}
-                    {c.number && <span>{c.number}</span>}
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
         </PullToRefresh>
       </main>
     </div>
