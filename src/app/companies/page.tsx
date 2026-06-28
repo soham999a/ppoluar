@@ -2,12 +2,11 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
-import { useEffect, useState, useRef } from "react"
-import { collection, query, orderBy, limit, startAfter, getDocs, addDoc, serverTimestamp, type DocumentSnapshot } from "firebase/firestore"
+import { useEffect, useState } from "react"
+import { collection, onSnapshot, addDoc, serverTimestamp, orderBy, query } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { clearCache } from "@/lib/data-cache"
 import Sidebar from "@/components/Sidebar"
-import Pagination from "@/components/Pagination"
+import PullToRefresh from "@/components/PullToRefresh"
 import Link from "next/link"
 import { FiPlus, FiChevronRight, FiX } from "react-icons/fi"
 
@@ -24,12 +23,8 @@ interface Company {
 export default function CompaniesPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
-  const PAGE_SIZE = 10
   const [companies, setCompanies] = useState<Company[]>([])
   const [dataLoading, setDataLoading] = useState(true)
-  const [page, setPage] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
-  const cursors = useRef<(DocumentSnapshot | null)[]>([null])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: "", gst: "", contact: "", email: "", number: "" })
   const [saving, setSaving] = useState(false)
@@ -38,53 +33,29 @@ export default function CompaniesPage() {
     if (!loading && !user) router.replace("/")
   }, [user, loading, router])
 
-  async function loadPage(pageIndex: number) {
-    if (!user) return
-    setDataLoading(true)
-    const cursorVal = cursors.current[pageIndex] ?? null
-    const q = cursorVal
-      ? query(collection(db, "companies"), orderBy("createdAt"), limit(PAGE_SIZE), startAfter(cursorVal))
-      : query(collection(db, "companies"), orderBy("createdAt"), limit(PAGE_SIZE))
-    const snap = await getDocs(q)
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Company))
-    setCompanies(list)
-    setHasMore(snap.docs.length === PAGE_SIZE)
-    cursors.current[pageIndex + 1] = snap.docs[snap.docs.length - 1] || null
-    setDataLoading(false)
-  }
-
   useEffect(() => {
-    loadPage(0)
+    if (!user) return
+    const q = query(collection(db, "companies"), orderBy("createdAt"))
+    const unsub = onSnapshot(q, (snap) => {
+      setCompanies(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Company)))
+      setDataLoading(false)
+    })
+    return unsub
   }, [user])
-
-  function goNext() {
-    const next = page + 1
-    setPage(next)
-    loadPage(next)
-  }
-
-  function goPrev() {
-    const prev = page - 1
-    setPage(prev)
-    loadPage(prev)
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) return
     setSaving(true)
+    const optimistic = { id: "temp-" + Date.now(), ...form }
+    setCompanies((prev) => [...prev, optimistic])
+    setForm({ name: "", gst: "", contact: "", email: "", number: "" })
+    setShowForm(false)
     try {
-      const docRef = await addDoc(collection(db, "companies"), {
-        ...form,
-        createdAt: serverTimestamp(),
-      })
-      setCompanies((prev) => [...prev, { id: docRef.id, ...form }])
-      clearCache("companies")
-      clearCache("dashboard")
-      setForm({ name: "", gst: "", contact: "", email: "", number: "" })
-      setShowForm(false)
+      await addDoc(collection(db, "companies"), { ...form, createdAt: serverTimestamp() })
     } catch (err) {
       console.error(err)
+      setCompanies((prev) => prev.filter((c) => c.id !== optimistic.id))
     } finally {
       setSaving(false)
     }
@@ -96,7 +67,7 @@ export default function CompaniesPage() {
     return (
       <div className="min-h-screen flex">
         <Sidebar />
-        <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0">
+      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0 animate-fade-in">
           <div className="h-7 bg-slate-100 rounded w-32 mb-1 animate-pulse" />
           <div className="h-4 bg-slate-100 rounded w-64 mb-6 animate-pulse" />
           <div className="hidden lg:block bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
@@ -120,7 +91,8 @@ export default function CompaniesPage() {
   return (
     <div className="min-h-screen flex">
       <Sidebar />
-      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0">
+      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0 animate-fade-in">
+        <PullToRefresh onRefresh={() => window.location.reload()}>
         <div className="flex items-center justify-between mb-6">
           <div className="min-w-0 flex-1 mr-3">
             <h1 className="text-xl lg:text-2xl font-bold text-slate-900">Companies</h1>
@@ -213,36 +185,35 @@ export default function CompaniesPage() {
               </tbody>
             </table>
           </div>
-          <Pagination page={page} hasMore={hasMore} onPrev={goPrev} onNext={goNext} />
         </div>
 
         <div className="block lg:hidden space-y-3">
-          {companies.length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
-              <p className="text-sm text-slate-400">No companies yet. Tap &ldquo;+&rdquo; to add one.</p>
-            </div>
-          ) : (
-            companies.map((c) => (
-              <Link
-                key={c.id}
-                href={`/companies/${c.id}`}
-                className="block bg-white rounded-xl shadow-sm border border-slate-200 p-4 active:bg-slate-50 transition-colors"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold text-slate-900 text-base">{c.name}</h3>
-                  <FiChevronRight className="text-slate-300 shrink-0" size={18} />
-                </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                  {c.gst && <span>GST: {c.gst}</span>}
-                  {c.contact && <span>{c.contact}</span>}
-                  {c.email && <span>{c.email}</span>}
-                  {c.number && <span>{c.number}</span>}
-                </div>
-              </Link>
-            ))
-          )}
-          <Pagination page={page} hasMore={hasMore} onPrev={goPrev} onNext={goNext} />
-        </div>
+            {companies.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+                <p className="text-sm text-slate-400">No companies yet. Tap &ldquo;+&rdquo; to add one.</p>
+              </div>
+            ) : (
+              companies.map((c) => (
+                <Link
+                  key={c.id}
+                  href={`/companies/${c.id}`}
+                  className="block bg-white rounded-xl shadow-sm border border-slate-200 p-4 active:bg-slate-50 transition-colors"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-semibold text-slate-900 text-base">{c.name}</h3>
+                    <FiChevronRight className="text-slate-300 shrink-0" size={18} />
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                    {c.gst && <span>GST: {c.gst}</span>}
+                    {c.contact && <span>{c.contact}</span>}
+                    {c.email && <span>{c.email}</span>}
+                    {c.number && <span>{c.number}</span>}
+                  </div>
+                </Link>
+              ))
+            )}
+          </div>
+        </PullToRefresh>
       </main>
     </div>
   )

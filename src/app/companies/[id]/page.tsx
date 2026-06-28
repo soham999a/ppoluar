@@ -2,12 +2,10 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter, useParams } from "next/navigation"
-import { useEffect, useState, useRef } from "react"
-import { doc, getDoc, collection, query, orderBy, limit, startAfter, getDocs, addDoc, updateDoc, serverTimestamp, type DocumentSnapshot } from "firebase/firestore"
+import { useEffect, useState } from "react"
+import { doc, getDoc, collection, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { clearCache } from "@/lib/data-cache"
 import Sidebar from "@/components/Sidebar"
-import Pagination from "@/components/Pagination"
 import Link from "next/link"
 import { FiArrowLeft, FiPlus, FiEdit2, FiChevronDown, FiChevronRight, FiX } from "react-icons/fi"
 
@@ -49,15 +47,11 @@ export default function CompanyDetailPage() {
   const params = useParams()
   const companyId = params.id as string
 
-  const BILLS_PAGE_SIZE = 5
   const [company, setCompany] = useState<Company | null>(null)
   const [bills, setBills] = useState<Bill[]>([])
   const [payments, setPayments] = useState<Record<string, Payment[]>>({})
   const [expandedBills, setExpandedBills] = useState<Record<string, boolean>>({})
   const [totalPending, setTotalPending] = useState(0)
-  const [billPage, setBillPage] = useState(0)
-  const [billHasMore, setBillHasMore] = useState(false)
-  const billCursors = useRef<(DocumentSnapshot | null)[]>([null])
 
   const [showBillForm, setShowBillForm] = useState(false)
   const [editingBill, setEditingBill] = useState<Bill | null>(null)
@@ -74,67 +68,47 @@ export default function CompanyDetailPage() {
     if (!loading && !user) router.replace("/")
   }, [user, loading, router])
 
-  async function loadBillsPage(pageIndex: number) {
-    if (!user || !companyId) return
-    setDataLoading(true)
-    const cursorVal = billCursors.current[pageIndex] ?? null
-    const billsQ = cursorVal
-      ? query(collection(db, "companies", companyId, "bills"), orderBy("createdAt"), limit(BILLS_PAGE_SIZE), startAfter(cursorVal))
-      : query(collection(db, "companies", companyId, "bills"), orderBy("createdAt"), limit(BILLS_PAGE_SIZE))
-    const [compSnap, billsSnap] = await Promise.all([
-      getDoc(doc(db, "companies", companyId)),
-      getDocs(billsQ),
-    ])
-    if (!compSnap.exists()) { setDataLoading(false); return }
-    if (!billsSnap.empty) {
-      billCursors.current[pageIndex + 1] = billsSnap.docs[billsSnap.docs.length - 1] || null
-    }
-    setBillHasMore(billsSnap.docs.length === BILLS_PAGE_SIZE)
-    setCompany({ id: compSnap.id, ...compSnap.data() } as Company)
-
-    const billList = billsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Bill))
-    setBills(billList)
-
-    const payResults = await Promise.all(
-      billList.map(async (bill) => {
-        const paySnap = await getDocs(collection(db, "companies", companyId, "bills", bill.id, "payments"))
-        return {
-          billId: bill.id,
-          payments: paySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment)),
-        }
-      }),
-    )
-
-    let pending = 0
-    const paymentsMap: Record<string, Payment[]> = {}
-    for (const r of payResults) {
-      paymentsMap[r.billId] = r.payments
-      const bill = billList.find((b) => b.id === r.billId)
-      const billAmt = Number(bill?.amount) || 0
-      const paid = r.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
-      pending += billAmt - paid
-    }
-    setPayments(paymentsMap)
-    setTotalPending(pending)
-    setDataLoading(false)
-  }
-
   useEffect(() => {
     if (!user || !companyId) return
-    loadBillsPage(0)
+    let destroyed = false
+
+    async function loadPayments(billList: Bill[]) {
+      const payResults = await Promise.all(
+        billList.map(async (bill) => {
+          const paySnap = await getDocs(collection(db, "companies", companyId, "bills", bill.id, "payments"))
+          return { billId: bill.id, payments: paySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment)) }
+        }),
+      )
+      let pending = 0
+      const paymentsMap: Record<string, Payment[]> = {}
+      for (const r of payResults) {
+        paymentsMap[r.billId] = r.payments
+        const bill = billList.find((b) => b.id === r.billId)
+        const billAmt = Number(bill?.amount) || 0
+        const paid = r.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+        pending += billAmt - paid
+      }
+      if (!destroyed) {
+        setPayments(paymentsMap)
+        setTotalPending(pending)
+      }
+    }
+
+    const unsub = onSnapshot(collection(db, "companies", companyId, "bills"), (snap) => {
+      const billList = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bill))
+      setBills(billList)
+      loadPayments(billList)
+      setDataLoading(false)
+    })
+
+    getDoc(doc(db, "companies", companyId)).then((compSnap) => {
+      if (compSnap.exists() && !destroyed) {
+        setCompany({ id: compSnap.id, ...compSnap.data() } as Company)
+      }
+    })
+
+    return () => { destroyed = true; unsub() }
   }, [user, companyId])
-
-  function goNextBillPage() {
-    const next = billPage + 1
-    setBillPage(next)
-    loadBillsPage(next)
-  }
-
-  function goPrevBillPage() {
-    const prev = billPage - 1
-    setBillPage(prev)
-    loadBillsPage(prev)
-  }
 
   function resetBillForm() {
     setBillForm({ billNumber: "", invoiceNumber: "", loadingDate: "", trucks: "", goods: "", amount: "", status: "Not Paid" })
@@ -151,61 +125,60 @@ export default function CompanyDetailPage() {
   async function handleBillSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
-    try {
-      if (editingBill) {
+    const optimisticId = "temp-" + Date.now()
+    if (editingBill) {
+      try {
         await updateDoc(doc(db, "companies", companyId, "bills", editingBill.id), billForm)
-        setBills((prev) => prev.map((b) => (b.id === editingBill.id ? { ...b, ...billForm } : b)))
-      } else {
-        const docRef = await addDoc(collection(db, "companies", companyId, "bills"), {
-          ...billForm,
-          createdAt: serverTimestamp(),
-        })
-        setBills((prev) => [...prev, { id: docRef.id, ...billForm }])
+        resetBillForm()
+      } catch (err) {
+        console.error(err)
       }
-      clearCache(`company-detail-${companyId}`)
-      clearCache("dashboard")
+    } else {
+      const optimistic = { id: optimisticId, ...billForm }
+      setBills((prev) => [...prev, optimistic])
       resetBillForm()
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setSaving(false)
+      try {
+        await addDoc(collection(db, "companies", companyId, "bills"), { ...billForm, createdAt: serverTimestamp() })
+      } catch (err) {
+        console.error(err)
+        setBills((prev) => prev.filter((b) => b.id !== optimisticId))
+      }
     }
+    setSaving(false)
   }
 
   async function handlePaymentSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!showPaymentForm) return
     setSaving(true)
-    try {
-      if (editingPayment) {
+    const optimisticId = "temp-" + Date.now()
+    if (editingPayment) {
+      try {
         await updateDoc(
           doc(db, "companies", companyId, "bills", editingPayment.billId, "payments", editingPayment.payment.id),
           paymentForm,
         )
-        setPayments((prev) => ({
-          ...prev,
-          [editingPayment.billId]: prev[editingPayment.billId].map((p) =>
-            p.id === editingPayment.payment.id ? { ...p, ...paymentForm } : p,
-          ),
-        }))
-      } else {
-        const docRef = await addDoc(collection(db, "companies", companyId, "bills", showPaymentForm, "payments"), {
+        resetPaymentForm()
+      } catch (err) {
+        console.error(err)
+      }
+    } else {
+      const optimistic = { id: optimisticId, ...paymentForm }
+      setPayments((prev) => ({
+        ...prev,
+        [showPaymentForm]: [...(prev[showPaymentForm] || []), optimistic],
+      }))
+      resetPaymentForm()
+      try {
+        await addDoc(collection(db, "companies", companyId, "bills", showPaymentForm, "payments"), {
           ...paymentForm,
           createdAt: serverTimestamp(),
         })
-        setPayments((prev) => ({
-          ...prev,
-          [showPaymentForm]: [...(prev[showPaymentForm] || []), { id: docRef.id, ...paymentForm }],
-        }))
+      } catch (err) {
+        console.error(err)
       }
-      clearCache(`company-detail-${companyId}`)
-      clearCache("dashboard")
-      resetPaymentForm()
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setSaving(false)
     }
+    setSaving(false)
   }
 
   function openEditBill(bill: Bill) {
@@ -274,7 +247,7 @@ export default function CompanyDetailPage() {
   return (
     <div className="min-h-screen flex">
       <Sidebar />
-      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0">
+      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0 animate-fade-in">
         <Link href="/companies" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-3 lg:mb-4 transition-colors">
           <FiArrowLeft size={14} />
           Back
@@ -368,9 +341,12 @@ export default function CompanyDetailPage() {
 
               return (
                 <div key={bill.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                  <button
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => toggleBill(bill.id)}
-                    className="w-full flex items-center justify-between p-4 active:bg-slate-50 transition-colors text-left"
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") toggleBill(bill.id) }}
+                    className="w-full flex items-center justify-between p-4 active:bg-slate-50 transition-colors text-left cursor-pointer"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       {isExpanded ? <FiChevronDown className="text-slate-300 shrink-0" size={18} /> : <FiChevronRight className="text-slate-300 shrink-0" size={18} />}
@@ -392,7 +368,7 @@ export default function CompanyDetailPage() {
                         <FiEdit2 size={14} />
                       </button>
                     </div>
-                  </button>
+                  </div>
 
                   {isExpanded && (
                     <div className="border-t border-slate-100 animate-fade-in">
@@ -515,7 +491,6 @@ export default function CompanyDetailPage() {
               )
             })
           )}
-          <Pagination page={billPage} hasMore={billHasMore} onPrev={goPrevBillPage} onNext={goNextBillPage} />
         </div>
       </main>
     </div>

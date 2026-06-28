@@ -3,10 +3,10 @@
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { collection, collectionGroup, getDocs } from "firebase/firestore"
+import { collection, collectionGroup, onSnapshot } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { getCached, setCache } from "@/lib/data-cache"
 import Sidebar from "@/components/Sidebar"
+import PullToRefresh from "@/components/PullToRefresh"
 import Link from "next/link"
 import { FiTruck, FiFileText, FiDollarSign, FiAlertCircle } from "react-icons/fi"
 
@@ -26,6 +26,7 @@ export default function DashboardPage() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [stats, setStats] = useState({ companies: 0, bills: 0, received: 0, outstanding: 0 })
   const [dataLoading, setDataLoading] = useState(true)
+  const [listenerError, setListenerError] = useState("")
 
   useEffect(() => {
     if (!loading && !user) router.replace("/")
@@ -33,73 +34,60 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!user) return
-    async function fetchData() {
-      try {
-        const cached = getCached<{ companies: Company[]; stats: typeof stats }>("dashboard")
-        if (cached) {
-          setCompanies(cached.companies)
-          setStats(cached.stats)
-          setDataLoading(false)
-          return
-        }
 
-        const [companiesSnap, allBillsSnap, allPaymentsSnap] = await Promise.all([
-          getDocs(collection(db, "companies")),
-          getDocs(collectionGroup(db, "bills")),
-          getDocs(collectionGroup(db, "payments")),
-        ])
-        const comps = companiesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Company))
-        setCompanies(comps)
+    let destroyed = false
+    const companiesData: Company[] = []
+    let billAmountByPath: Record<string, number> = {}
+    let paidByBillPath: Record<string, number> = {}
 
-        const billAmountByPath: Record<string, number> = {}
-        allBillsSnap.forEach((d) => {
-          billAmountByPath[d.ref.path] = Number(d.data().amount) || 0
-        })
-
-        const paidByBillPath: Record<string, number> = {}
-        allPaymentsSnap.forEach((d) => {
-          const billPath = d.ref.parent.parent?.parent?.path || ""
-          paidByBillPath[billPath] = (paidByBillPath[billPath] || 0) + (Number(d.data().amount) || 0)
-        })
-
-        let totalBills = 0, totalReceived = 0, totalOutstanding = 0
-        const companyBillCount: Record<string, number> = {}
-        const companyBillPathPrefix: Record<string, string> = {}
-
-        for (const comp of comps) {
-          const prefix = `companies/${comp.id}/bills/`
-          companyBillPathPrefix[comp.id] = prefix
-          companyBillCount[comp.id] = 0
-        }
-
-        for (const [billPath, amount] of Object.entries(billAmountByPath)) {
-          totalBills++
-          const paid = paidByBillPath[billPath] || 0
-          totalReceived += paid
-          totalOutstanding += amount - paid
-          for (const comp of comps) {
-            if (billPath.startsWith(`companies/${comp.id}/bills/`)) {
-              companyBillCount[comp.id]++
-              break
-            }
-          }
-        }
-
-        const newStats = {
-          companies: comps.length,
-          bills: totalBills,
-          received: totalReceived,
-          outstanding: totalOutstanding,
-        }
-        setStats(newStats)
-        setCache("dashboard", { companies: comps, stats: newStats })
-      } catch (err) {
-        console.error("Error fetching dashboard data:", err)
-      } finally {
+    function recompute() {
+      let totalBills = 0, totalReceived = 0, totalOutstanding = 0
+      for (const [billPath, amount] of Object.entries(billAmountByPath)) {
+        totalBills++
+        const paid = paidByBillPath[billPath] || 0
+        totalReceived += paid
+        totalOutstanding += amount - paid
+      }
+      if (!destroyed) {
+        setCompanies([...companiesData])
+        setStats({ companies: companiesData.length, bills: totalBills, received: totalReceived, outstanding: totalOutstanding })
         setDataLoading(false)
       }
     }
-    fetchData()
+
+    const unsubCompanies = onSnapshot(collection(db, "companies"), (snap) => {
+      companiesData.length = 0
+      snap.forEach((d) => companiesData.push({ id: d.id, ...d.data() } as Company))
+      recompute()
+    }, (err) => { console.error(err); setDataLoading(false) })
+
+    const unsubBills = onSnapshot(collectionGroup(db, "bills"), (snap) => {
+      billAmountByPath = {}
+      snap.forEach((d) => { billAmountByPath[d.ref.path] = Number(d.data().amount) || 0 })
+      recompute()
+    }, (err) => {
+      console.error("Bills listener error:", err)
+      setListenerError("Failed to load bills. Check Firestore indexes and rules.")
+    })
+
+    const unsubPayments = onSnapshot(collectionGroup(db, "payments"), (snap) => {
+      paidByBillPath = {}
+      snap.forEach((d) => {
+        const billPath = d.ref.parent.parent?.parent?.path || ""
+        paidByBillPath[billPath] = (paidByBillPath[billPath] || 0) + (Number(d.data().amount) || 0)
+      })
+      recompute()
+    }, (err) => {
+      console.error("Payments listener error:", err)
+      setListenerError("Failed to load payments. Check Firestore indexes and rules.")
+    })
+
+    return () => {
+      destroyed = true
+      unsubCompanies()
+      unsubBills()
+      unsubPayments()
+    }
   }, [user])
 
   if (loading || !user) return null
@@ -107,7 +95,13 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen flex">
       <Sidebar />
-      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0">
+      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0 animate-fade-in">
+        <PullToRefresh onRefresh={() => window.location.reload()}>
+        {listenerError && (
+          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl p-3">
+            {listenerError}
+          </div>
+        )}
         <h1 className="text-xl lg:text-2xl font-bold text-slate-900 mb-1">Dashboard</h1>
         <p className="text-slate-500 text-sm mb-5 lg:mb-6">A quick look at your business today.</p>
 
@@ -178,6 +172,7 @@ export default function DashboardPage() {
           <h2 className="text-base lg:text-lg font-semibold text-slate-900 mb-4">Recent activity</h2>
           <p className="text-sm text-slate-400 py-6 text-center">No activity yet.</p>
         </div>
+        </PullToRefresh>
       </main>
     </div>
   )

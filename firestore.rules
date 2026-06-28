@@ -16,5 +16,13 @@ service cloud.firestore {
     match /businessFields/{id} {
       allow read, write: if request.auth != null;
     }
+
+    // Collection group access for dashboard real-time listeners
+    match /{path=**}/bills/{billId} {
+      allow read: if request.auth != null;
+    }
+    match /{path=**}/payments/{paymentId} {
+      allow read: if request.auth != null;
+    }
   }
 }

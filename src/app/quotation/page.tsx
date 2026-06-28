@@ -2,11 +2,11 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
-import { useEffect, useState, useRef } from "react"
-import { collection, query, orderBy, limit, startAfter, getDocs, addDoc, serverTimestamp, type DocumentSnapshot } from "firebase/firestore"
+import { useEffect, useState } from "react"
+import { collection, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
-import Pagination from "@/components/Pagination"
+import PullToRefresh from "@/components/PullToRefresh"
 
 interface Quotation {
   id: string
@@ -25,12 +25,8 @@ interface Quotation {
 export default function QuotationPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
-  const PAGE_SIZE = 10
   const [quotations, setQuotations] = useState<Quotation[]>([])
   const [dataLoading, setDataLoading] = useState(true)
-  const [page, setPage] = useState(0)
-  const [hasMore, setHasMore] = useState(false)
-  const cursors = useRef<(DocumentSnapshot | null)[]>([null])
   const [form, setForm] = useState({
     from: "", to: "", truckFreight: "", truckCategory: "", detention: "",
     slotBooking: "", loadingCharges: "", unloadingCharges: "", cwcParking: "",
@@ -41,36 +37,14 @@ export default function QuotationPage() {
     if (!loading && !user) router.replace("/")
   }, [user, loading, router])
 
-  async function loadPage(pageIndex: number) {
-    if (!user) return
-    setDataLoading(true)
-    const cursorVal = cursors.current[pageIndex] ?? null
-    const q = cursorVal
-      ? query(collection(db, "quotations"), orderBy("createdAt"), limit(PAGE_SIZE), startAfter(cursorVal))
-      : query(collection(db, "quotations"), orderBy("createdAt"), limit(PAGE_SIZE))
-    const snap = await getDocs(q)
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation))
-    setQuotations(list)
-    setHasMore(snap.docs.length === PAGE_SIZE)
-    cursors.current[pageIndex + 1] = snap.docs[snap.docs.length - 1] || null
-    setDataLoading(false)
-  }
-
   useEffect(() => {
-    loadPage(0)
+    if (!user) return
+    const unsub = onSnapshot(collection(db, "quotations"), (snap) => {
+      setQuotations(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation)))
+      setDataLoading(false)
+    })
+    return unsub
   }, [user])
-
-  function goNext() {
-    const next = page + 1
-    setPage(next)
-    loadPage(next)
-  }
-
-  function goPrev() {
-    const prev = page - 1
-    setPage(prev)
-    loadPage(prev)
-  }
 
   function resetForm() {
     setForm({
@@ -82,15 +56,16 @@ export default function QuotationPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+    const optimistic = { id: "temp-" + Date.now(), ...form }
+    setQuotations((prev) => [...prev, optimistic])
+    resetForm()
     try {
-      const docRef = await addDoc(collection(db, "quotations"), { ...form, createdAt: serverTimestamp() })
-      setQuotations((prev) => [...prev, { id: docRef.id, ...form }])
-      resetForm()
+      await addDoc(collection(db, "quotations"), { ...form, createdAt: serverTimestamp() })
     } catch (err) {
       console.error(err)
-    } finally {
-      setSaving(false)
+      setQuotations((prev) => prev.filter((q) => q.id !== optimistic.id))
     }
+    setSaving(false)
   }
 
   if (loading || !user) return null
@@ -98,7 +73,8 @@ export default function QuotationPage() {
   return (
     <div className="min-h-screen flex">
       <Sidebar />
-      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0">
+      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0 animate-fade-in">
+        <PullToRefresh onRefresh={() => window.location.reload()}>
         <h1 className="text-xl lg:text-2xl font-bold text-slate-900 mb-1">Quotation</h1>
         <p className="text-slate-500 text-sm mb-5 lg:mb-6">Build a freight quotation, save it, print or share.</p>
 
@@ -175,7 +151,6 @@ export default function QuotationPage() {
               </tbody>
             </table>
           </div>
-          <Pagination page={page} hasMore={hasMore} onPrev={goPrev} onNext={goNext} />
         </div>
 
         <div className="block lg:hidden space-y-3">
@@ -195,8 +170,8 @@ export default function QuotationPage() {
               </div>
             ))
           )}
-          <Pagination page={page} hasMore={hasMore} onPrev={goPrev} onNext={goNext} />
         </div>
+        </PullToRefresh>
       </main>
     </div>
   )

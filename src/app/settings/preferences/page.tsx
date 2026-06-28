@@ -38,7 +38,7 @@ export default function PreferencesPage() {
   return (
     <div className="min-h-screen flex">
       <Sidebar />
-      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0">
+      <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0 animate-fade-in">
         <Link href="/settings" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-3 lg:mb-4 transition-colors">
           <FiArrowLeft size={14} />
           Back
