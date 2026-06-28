@@ -2,11 +2,12 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter, useParams } from "next/navigation"
-import { useEffect, useState } from "react"
-import { doc, getDoc, collection, getDocs, addDoc, updateDoc, serverTimestamp } from "firebase/firestore"
+import { useEffect, useState, useRef } from "react"
+import { doc, getDoc, collection, query, orderBy, limit, startAfter, getDocs, addDoc, updateDoc, serverTimestamp, type DocumentSnapshot } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { getCached, setCache, clearCache } from "@/lib/data-cache"
+import { clearCache } from "@/lib/data-cache"
 import Sidebar from "@/components/Sidebar"
+import Pagination from "@/components/Pagination"
 import Link from "next/link"
 import { FiArrowLeft, FiPlus, FiEdit2, FiChevronDown, FiChevronRight, FiX } from "react-icons/fi"
 
@@ -48,11 +49,15 @@ export default function CompanyDetailPage() {
   const params = useParams()
   const companyId = params.id as string
 
+  const BILLS_PAGE_SIZE = 5
   const [company, setCompany] = useState<Company | null>(null)
   const [bills, setBills] = useState<Bill[]>([])
   const [payments, setPayments] = useState<Record<string, Payment[]>>({})
   const [expandedBills, setExpandedBills] = useState<Record<string, boolean>>({})
   const [totalPending, setTotalPending] = useState(0)
+  const [billPage, setBillPage] = useState(0)
+  const [billHasMore, setBillHasMore] = useState(false)
+  const billCursors = useRef<(DocumentSnapshot | null)[]>([null])
 
   const [showBillForm, setShowBillForm] = useState(false)
   const [editingBill, setEditingBill] = useState<Bill | null>(null)
@@ -69,58 +74,67 @@ export default function CompanyDetailPage() {
     if (!loading && !user) router.replace("/")
   }, [user, loading, router])
 
+  async function loadBillsPage(pageIndex: number) {
+    if (!user || !companyId) return
+    setDataLoading(true)
+    const cursorVal = billCursors.current[pageIndex] ?? null
+    const billsQ = cursorVal
+      ? query(collection(db, "companies", companyId, "bills"), orderBy("createdAt"), limit(BILLS_PAGE_SIZE), startAfter(cursorVal))
+      : query(collection(db, "companies", companyId, "bills"), orderBy("createdAt"), limit(BILLS_PAGE_SIZE))
+    const [compSnap, billsSnap] = await Promise.all([
+      getDoc(doc(db, "companies", companyId)),
+      getDocs(billsQ),
+    ])
+    if (!compSnap.exists()) { setDataLoading(false); return }
+    if (!billsSnap.empty) {
+      billCursors.current[pageIndex + 1] = billsSnap.docs[billsSnap.docs.length - 1] || null
+    }
+    setBillHasMore(billsSnap.docs.length === BILLS_PAGE_SIZE)
+    setCompany({ id: compSnap.id, ...compSnap.data() } as Company)
+
+    const billList = billsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Bill))
+    setBills(billList)
+
+    const payResults = await Promise.all(
+      billList.map(async (bill) => {
+        const paySnap = await getDocs(collection(db, "companies", companyId, "bills", bill.id, "payments"))
+        return {
+          billId: bill.id,
+          payments: paySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment)),
+        }
+      }),
+    )
+
+    let pending = 0
+    const paymentsMap: Record<string, Payment[]> = {}
+    for (const r of payResults) {
+      paymentsMap[r.billId] = r.payments
+      const bill = billList.find((b) => b.id === r.billId)
+      const billAmt = Number(bill?.amount) || 0
+      const paid = r.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+      pending += billAmt - paid
+    }
+    setPayments(paymentsMap)
+    setTotalPending(pending)
+    setDataLoading(false)
+  }
+
   useEffect(() => {
     if (!user || !companyId) return
-    async function fetchData() {
-      const cacheKey = `company-detail-${companyId}`
-      const cached = getCached<{ company: Company; bills: Bill[]; payments: Record<string, Payment[]>; pending: number }>(cacheKey)
-      if (cached) {
-        setCompany(cached.company)
-        setBills(cached.bills)
-        setPayments(cached.payments)
-        setTotalPending(cached.pending)
-        setDataLoading(false)
-        return
-      }
-
-      const [compSnap, billsSnap] = await Promise.all([
-        getDoc(doc(db, "companies", companyId)),
-        getDocs(collection(db, "companies", companyId, "bills")),
-      ])
-      if (!compSnap.exists()) { setDataLoading(false); return }
-      const company = { id: compSnap.id, ...compSnap.data() } as Company
-      setCompany(company)
-
-      const billList = billsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Bill))
-      setBills(billList)
-
-      const payResults = await Promise.all(
-        billList.map(async (bill) => {
-          const paySnap = await getDocs(collection(db, "companies", companyId, "bills", bill.id, "payments"))
-          return {
-            billId: bill.id,
-            payments: paySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment)),
-          }
-        }),
-      )
-
-      let pending = 0
-      const paymentsMap: Record<string, Payment[]> = {}
-      for (const r of payResults) {
-        paymentsMap[r.billId] = r.payments
-        const bill = billList.find((b) => b.id === r.billId)
-        const billAmt = Number(bill?.amount) || 0
-        const paid = r.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
-        pending += billAmt - paid
-      }
-      setPayments(paymentsMap)
-      setTotalPending(pending)
-
-      setCache(cacheKey, { company, bills: billList, payments: paymentsMap, pending })
-      setDataLoading(false)
-    }
-    fetchData()
+    loadBillsPage(0)
   }, [user, companyId])
+
+  function goNextBillPage() {
+    const next = billPage + 1
+    setBillPage(next)
+    loadBillsPage(next)
+  }
+
+  function goPrevBillPage() {
+    const prev = billPage - 1
+    setBillPage(prev)
+    loadBillsPage(prev)
+  }
 
   function resetBillForm() {
     setBillForm({ billNumber: "", invoiceNumber: "", loadingDate: "", trucks: "", goods: "", amount: "", status: "Not Paid" })
@@ -501,6 +515,7 @@ export default function CompanyDetailPage() {
               )
             })
           )}
+          <Pagination page={billPage} hasMore={billHasMore} onPrev={goPrevBillPage} onNext={goNextBillPage} />
         </div>
       </main>
     </div>

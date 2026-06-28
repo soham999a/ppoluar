@@ -2,11 +2,12 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { collection, getDocs, addDoc, serverTimestamp } from "firebase/firestore"
+import { useEffect, useState, useRef } from "react"
+import { collection, query, orderBy, limit, startAfter, getDocs, addDoc, serverTimestamp, type DocumentSnapshot } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-import { getCached, setCache, clearCache } from "@/lib/data-cache"
+import { clearCache } from "@/lib/data-cache"
 import Sidebar from "@/components/Sidebar"
+import Pagination from "@/components/Pagination"
 import Link from "next/link"
 import { FiPlus, FiChevronRight, FiX } from "react-icons/fi"
 
@@ -23,8 +24,12 @@ interface Company {
 export default function CompaniesPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const PAGE_SIZE = 10
   const [companies, setCompanies] = useState<Company[]>([])
   const [dataLoading, setDataLoading] = useState(true)
+  const [page, setPage] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const cursors = useRef<(DocumentSnapshot | null)[]>([null])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: "", gst: "", contact: "", email: "", number: "" })
   const [saving, setSaving] = useState(false)
@@ -33,19 +38,36 @@ export default function CompaniesPage() {
     if (!loading && !user) router.replace("/")
   }, [user, loading, router])
 
-  useEffect(() => {
+  async function loadPage(pageIndex: number) {
     if (!user) return
-    async function fetchCompanies() {
-      const cached = getCached<Company[]>("companies")
-      if (cached) { setCompanies(cached); setDataLoading(false); return }
-      const snap = await getDocs(collection(db, "companies"))
-      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Company))
-      setCompanies(list)
-      setCache("companies", list)
-      setDataLoading(false)
-    }
-    fetchCompanies()
+    setDataLoading(true)
+    const cursorVal = cursors.current[pageIndex] ?? null
+    const q = cursorVal
+      ? query(collection(db, "companies"), orderBy("createdAt"), limit(PAGE_SIZE), startAfter(cursorVal))
+      : query(collection(db, "companies"), orderBy("createdAt"), limit(PAGE_SIZE))
+    const snap = await getDocs(q)
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Company))
+    setCompanies(list)
+    setHasMore(snap.docs.length === PAGE_SIZE)
+    cursors.current[pageIndex + 1] = snap.docs[snap.docs.length - 1] || null
+    setDataLoading(false)
+  }
+
+  useEffect(() => {
+    loadPage(0)
   }, [user])
+
+  function goNext() {
+    const next = page + 1
+    setPage(next)
+    loadPage(next)
+  }
+
+  function goPrev() {
+    const prev = page - 1
+    setPage(prev)
+    loadPage(prev)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -191,6 +213,7 @@ export default function CompaniesPage() {
               </tbody>
             </table>
           </div>
+          <Pagination page={page} hasMore={hasMore} onPrev={goPrev} onNext={goNext} />
         </div>
 
         <div className="block lg:hidden space-y-3">
@@ -218,6 +241,7 @@ export default function CompaniesPage() {
               </Link>
             ))
           )}
+          <Pagination page={page} hasMore={hasMore} onPrev={goPrev} onNext={goNext} />
         </div>
       </main>
     </div>

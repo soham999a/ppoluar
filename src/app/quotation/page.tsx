@@ -2,11 +2,11 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { collection, getDocs, addDoc, serverTimestamp } from "firebase/firestore"
+import { useEffect, useState, useRef } from "react"
+import { collection, query, orderBy, limit, startAfter, getDocs, addDoc, serverTimestamp, type DocumentSnapshot } from "firebase/firestore"
 import { db } from "@/lib/firebase"
-
 import Sidebar from "@/components/Sidebar"
+import Pagination from "@/components/Pagination"
 
 interface Quotation {
   id: string
@@ -25,7 +25,12 @@ interface Quotation {
 export default function QuotationPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const PAGE_SIZE = 10
   const [quotations, setQuotations] = useState<Quotation[]>([])
+  const [dataLoading, setDataLoading] = useState(true)
+  const [page, setPage] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const cursors = useRef<(DocumentSnapshot | null)[]>([null])
   const [form, setForm] = useState({
     from: "", to: "", truckFreight: "", truckCategory: "", detention: "",
     slotBooking: "", loadingCharges: "", unloadingCharges: "", cwcParking: "",
@@ -36,14 +41,36 @@ export default function QuotationPage() {
     if (!loading && !user) router.replace("/")
   }, [user, loading, router])
 
-  useEffect(() => {
+  async function loadPage(pageIndex: number) {
     if (!user) return
-    async function fetchData() {
-      const snap = await getDocs(collection(db, "quotations"))
-      setQuotations(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation)))
-    }
-    fetchData()
+    setDataLoading(true)
+    const cursorVal = cursors.current[pageIndex] ?? null
+    const q = cursorVal
+      ? query(collection(db, "quotations"), orderBy("createdAt"), limit(PAGE_SIZE), startAfter(cursorVal))
+      : query(collection(db, "quotations"), orderBy("createdAt"), limit(PAGE_SIZE))
+    const snap = await getDocs(q)
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation))
+    setQuotations(list)
+    setHasMore(snap.docs.length === PAGE_SIZE)
+    cursors.current[pageIndex + 1] = snap.docs[snap.docs.length - 1] || null
+    setDataLoading(false)
+  }
+
+  useEffect(() => {
+    loadPage(0)
   }, [user])
+
+  function goNext() {
+    const next = page + 1
+    setPage(next)
+    loadPage(next)
+  }
+
+  function goPrev() {
+    const prev = page - 1
+    setPage(prev)
+    loadPage(prev)
+  }
 
   function resetForm() {
     setForm({
@@ -148,6 +175,7 @@ export default function QuotationPage() {
               </tbody>
             </table>
           </div>
+          <Pagination page={page} hasMore={hasMore} onPrev={goPrev} onNext={goNext} />
         </div>
 
         <div className="block lg:hidden space-y-3">
@@ -167,6 +195,7 @@ export default function QuotationPage() {
               </div>
             ))
           )}
+          <Pagination page={page} hasMore={hasMore} onPrev={goPrev} onNext={goNext} />
         </div>
       </main>
     </div>
