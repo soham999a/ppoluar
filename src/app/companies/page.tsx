@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { collection, getDocs, addDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
+import { getCached, setCache, clearCache } from "@/lib/data-cache"
 import Sidebar from "@/components/Sidebar"
 import Link from "next/link"
 import { FiPlus, FiChevronRight, FiX } from "react-icons/fi"
@@ -23,6 +24,7 @@ export default function CompaniesPage() {
   const { user, loading } = useAuth()
   const router = useRouter()
   const [companies, setCompanies] = useState<Company[]>([])
+  const [dataLoading, setDataLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: "", gst: "", contact: "", email: "", number: "" })
   const [saving, setSaving] = useState(false)
@@ -34,8 +36,13 @@ export default function CompaniesPage() {
   useEffect(() => {
     if (!user) return
     async function fetchCompanies() {
+      const cached = getCached<Company[]>("companies")
+      if (cached) { setCompanies(cached); setDataLoading(false); return }
       const snap = await getDocs(collection(db, "companies"))
-      setCompanies(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Company)))
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Company))
+      setCompanies(list)
+      setCache("companies", list)
+      setDataLoading(false)
     }
     fetchCompanies()
   }, [user])
@@ -50,6 +57,8 @@ export default function CompaniesPage() {
         createdAt: serverTimestamp(),
       })
       setCompanies((prev) => [...prev, { id: docRef.id, ...form }])
+      clearCache("companies")
+      clearCache("dashboard")
       setForm({ name: "", gst: "", contact: "", email: "", number: "" })
       setShowForm(false)
     } catch (err) {
@@ -60,6 +69,31 @@ export default function CompaniesPage() {
   }
 
   if (loading || !user) return null
+
+  if (dataLoading) {
+    return (
+      <div className="min-h-screen flex">
+        <Sidebar />
+        <main className="flex-1 ml-64 max-lg:ml-0 p-4 lg:p-8 pt-4 lg:pt-8 pb-24 lg:pb-0">
+          <div className="h-7 bg-slate-100 rounded w-32 mb-1 animate-pulse" />
+          <div className="h-4 bg-slate-100 rounded w-64 mb-6 animate-pulse" />
+          <div className="hidden lg:block bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="p-4 space-y-3">
+              {[1, 2, 3].map((i) => <div key={i} className="h-12 bg-slate-50 rounded animate-pulse" />)}
+            </div>
+          </div>
+          <div className="block lg:hidden space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 animate-pulse">
+                <div className="h-4 bg-slate-100 rounded w-40 mb-2" />
+                <div className="h-3 bg-slate-50 rounded w-24" />
+              </div>
+            ))}
+          </div>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen flex">

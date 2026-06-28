@@ -3,8 +3,9 @@
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { collection, getDocs } from "firebase/firestore"
+import { collection, collectionGroup, getDocs } from "firebase/firestore"
 import { db } from "@/lib/firebase"
+import { getCached, setCache } from "@/lib/data-cache"
 import Sidebar from "@/components/Sidebar"
 import Link from "next/link"
 import { FiTruck, FiFileText, FiDollarSign, FiAlertCircle } from "react-icons/fi"
@@ -34,35 +35,64 @@ export default function DashboardPage() {
     if (!user) return
     async function fetchData() {
       try {
-        const companiesSnap = await getDocs(collection(db, "companies"))
+        const cached = getCached<{ companies: Company[]; stats: typeof stats }>("dashboard")
+        if (cached) {
+          setCompanies(cached.companies)
+          setStats(cached.stats)
+          setDataLoading(false)
+          return
+        }
+
+        const [companiesSnap, allBillsSnap, allPaymentsSnap] = await Promise.all([
+          getDocs(collection(db, "companies")),
+          getDocs(collectionGroup(db, "bills")),
+          getDocs(collectionGroup(db, "payments")),
+        ])
         const comps = companiesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Company))
         setCompanies(comps)
 
-        const billResults = await Promise.all(
-          comps.map(async (comp) => {
-            const billsSnap = await getDocs(collection(db, "companies", comp.id, "bills"))
-            const payResults = await Promise.all(
-              billsSnap.docs.map(async (billDoc) => {
-                const amount = Number(billDoc.data().amount) || 0
-                const paymentsSnap = await getDocs(collection(db, "companies", comp.id, "bills", billDoc.id, "payments"))
-                let paid = 0
-                paymentsSnap.forEach((p) => { paid += Number(p.data().amount) || 0 })
-                return { amount, paid }
-              }),
-            )
-            return {
-              billCount: billsSnap.size,
-              received: payResults.reduce((s, r) => s + r.paid, 0),
-              outstanding: payResults.reduce((s, r) => s + r.amount - r.paid, 0),
-            }
-          }),
-        )
-        setStats({
-          companies: comps.length,
-          bills: billResults.reduce((s, r) => s + r.billCount, 0),
-          received: billResults.reduce((s, r) => s + r.received, 0),
-          outstanding: billResults.reduce((s, r) => s + r.outstanding, 0),
+        const billAmountByPath: Record<string, number> = {}
+        allBillsSnap.forEach((d) => {
+          billAmountByPath[d.ref.path] = Number(d.data().amount) || 0
         })
+
+        const paidByBillPath: Record<string, number> = {}
+        allPaymentsSnap.forEach((d) => {
+          const billPath = d.ref.parent.parent?.parent?.path || ""
+          paidByBillPath[billPath] = (paidByBillPath[billPath] || 0) + (Number(d.data().amount) || 0)
+        })
+
+        let totalBills = 0, totalReceived = 0, totalOutstanding = 0
+        const companyBillCount: Record<string, number> = {}
+        const companyBillPathPrefix: Record<string, string> = {}
+
+        for (const comp of comps) {
+          const prefix = `companies/${comp.id}/bills/`
+          companyBillPathPrefix[comp.id] = prefix
+          companyBillCount[comp.id] = 0
+        }
+
+        for (const [billPath, amount] of Object.entries(billAmountByPath)) {
+          totalBills++
+          const paid = paidByBillPath[billPath] || 0
+          totalReceived += paid
+          totalOutstanding += amount - paid
+          for (const comp of comps) {
+            if (billPath.startsWith(`companies/${comp.id}/bills/`)) {
+              companyBillCount[comp.id]++
+              break
+            }
+          }
+        }
+
+        const newStats = {
+          companies: comps.length,
+          bills: totalBills,
+          received: totalReceived,
+          outstanding: totalOutstanding,
+        }
+        setStats(newStats)
+        setCache("dashboard", { companies: comps, stats: newStats })
       } catch (err) {
         console.error("Error fetching dashboard data:", err)
       } finally {
@@ -73,16 +103,6 @@ export default function DashboardPage() {
   }, [user])
 
   if (loading || !user) return null
-  if (dataLoading) {
-    return (
-      <div className="min-h-screen flex">
-        <Sidebar />
-        <div className="flex-1 flex items-center justify-center ml-64 max-lg:ml-0 p-4 pb-24 lg:pb-0">
-          <div className="animate-spin w-6 h-6 border-2 border-slate-900 border-t-transparent rounded-full" />
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="min-h-screen flex">
@@ -92,34 +112,47 @@ export default function DashboardPage() {
         <p className="text-slate-500 text-sm mb-5 lg:mb-6">A quick look at your business today.</p>
 
         <div className="grid grid-cols-2 gap-3 lg:gap-4 mb-6 lg:mb-8">
-          <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs lg:text-sm font-medium text-slate-500">Companies</span>
-              <FiTruck className="text-slate-300" size={16} />
-            </div>
-            <p className="text-xl lg:text-3xl font-bold text-slate-900">{stats.companies}</p>
-          </div>
-          <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs lg:text-sm font-medium text-slate-500">Bills</span>
-              <FiFileText className="text-slate-300" size={16} />
-            </div>
-            <p className="text-xl lg:text-3xl font-bold text-slate-900">{stats.bills}</p>
-          </div>
-          <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs lg:text-sm font-medium text-slate-500">Received</span>
-              <FiDollarSign className="text-green-400" size={16} />
-            </div>
-            <p className="text-lg lg:text-3xl font-bold text-slate-900 truncate">₹{stats.received.toLocaleString()}</p>
-          </div>
-          <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs lg:text-sm font-medium text-slate-500">Outstanding</span>
-              <FiAlertCircle className="text-red-400" size={16} />
-            </div>
-            <p className="text-lg lg:text-3xl font-bold text-red-600 truncate">₹{stats.outstanding.toLocaleString()}</p>
-          </div>
+          {dataLoading ? (
+            <>
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4 animate-pulse">
+                  <div className="h-3 bg-slate-100 rounded w-16 mb-3" />
+                  <div className="h-7 bg-slate-100 rounded w-20" />
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs lg:text-sm font-medium text-slate-500">Companies</span>
+                  <FiTruck className="text-slate-300" size={16} />
+                </div>
+                <p className="text-xl lg:text-3xl font-bold text-slate-900">{stats.companies}</p>
+              </div>
+              <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs lg:text-sm font-medium text-slate-500">Bills</span>
+                  <FiFileText className="text-slate-300" size={16} />
+                </div>
+                <p className="text-xl lg:text-3xl font-bold text-slate-900">{stats.bills}</p>
+              </div>
+              <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs lg:text-sm font-medium text-slate-500">Received</span>
+                  <FiDollarSign className="text-green-400" size={16} />
+                </div>
+                <p className="text-lg lg:text-3xl font-bold text-slate-900 truncate">₹{stats.received.toLocaleString()}</p>
+              </div>
+              <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs lg:text-sm font-medium text-slate-500">Outstanding</span>
+                  <FiAlertCircle className="text-red-400" size={16} />
+                </div>
+                <p className="text-lg lg:text-3xl font-bold text-red-600 truncate">₹{stats.outstanding.toLocaleString()}</p>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="bg-white rounded-xl lg:rounded-2xl shadow-sm border border-slate-200 p-4 lg:p-5 mb-6">
