@@ -3,7 +3,7 @@
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp } from "firebase/firestore"
+import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy, limit as fsLimit } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
 import PullToRefresh from "@/components/PullToRefresh"
@@ -37,10 +37,6 @@ function calcTotal(q: Quotation) {
 
 function formatDate(ts: any) {
   return ts?.toDate?.()?.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) || ""
-}
-
-function getDateValue(ts: any): number {
-  return ts?.toDate?.()?.getTime() ?? 0
 }
 
 function downloadPdf(q: Quotation) {
@@ -156,12 +152,13 @@ export default function QuotationPage() {
 
   useEffect(() => {
     if (!user) return
-    const unsub = onSnapshot(collection(db, "quotations"), (snap) => {
-      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation))
-      list.sort((a, b) => getDateValue(b.createdAt) - getDateValue(a.createdAt))
-      setQuotations(list)
-      setDataLoading(false)
-    })
+    const unsub = onSnapshot(
+      query(collection(db, "quotations"), orderBy("createdAt", "desc"), fsLimit(200)),
+      (snap) => {
+        setQuotations(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Quotation)))
+        setDataLoading(false)
+      },
+    )
     return unsub
   }, [user])
 

@@ -2,12 +2,14 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter, useParams } from "next/navigation"
-import { useEffect, useState } from "react"
-import { doc, getDoc, collection, onSnapshot, getDocs, addDoc, updateDoc, serverTimestamp } from "firebase/firestore"
+import { useEffect, useState, useMemo } from "react"
+import { doc, getDoc, collection, collectionGroup, onSnapshot, addDoc, updateDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
 import Link from "next/link"
 import { FiArrowLeft, FiPlus, FiEdit2, FiChevronDown, FiChevronRight, FiX } from "react-icons/fi"
+
+const PAGE_SIZE = 100
 
 interface Company {
   id: string
@@ -71,36 +73,37 @@ export default function CompanyDetailPage() {
   useEffect(() => {
     if (!user || !companyId) return
     let destroyed = false
-    const unsubPayments: (() => void)[] = []
+    let latestBills: Bill[] = []
 
-    function recalcPending(billList: Bill[], paymentsMap: Record<string, Payment[]>) {
+    function recalc(paymentsByBill: Record<string, Payment[]>) {
+      if (destroyed) return
+      setPayments({ ...paymentsByBill })
       let pending = 0
-      for (const bill of billList) {
+      for (let i = 0; i < latestBills.length; i++) {
+        const bill = latestBills[i]
         const billAmt = Number(bill.amount) || 0
-        const paid = (paymentsMap[bill.id] || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+        const paid = (paymentsByBill[bill.id] || []).reduce((s, p) => s + (Number(p.amount) || 0), 0)
         pending += billAmt - paid
       }
-      if (!destroyed) setTotalPending(pending)
+      setTotalPending(pending)
     }
 
     const unsubBills = onSnapshot(collection(db, "companies", companyId, "bills"), (snap) => {
-      const billList = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bill))
-      setBills(billList)
+      latestBills = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bill))
+      setBills(latestBills)
       setDataLoading(false)
+    })
 
-      unsubPayments.forEach((u) => u())
-      unsubPayments.length = 0
-
-      const paymentsMap: Record<string, Payment[]> = {}
-      billList.forEach((bill) => {
-        paymentsMap[bill.id] = []
-        const unsub = onSnapshot(collection(db, "companies", companyId, "bills", bill.id, "payments"), (paySnap) => {
-          paymentsMap[bill.id] = paySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment))
-          setPayments({ ...paymentsMap })
-          recalcPending(billList, paymentsMap)
-        })
-        unsubPayments.push(unsub)
+    const unsubPayments = onSnapshot(collectionGroup(db, "payments"), (snap) => {
+      const paymentsByBill: Record<string, Payment[]> = {}
+      snap.forEach((d) => {
+        const segs = d.ref.path.split("/")
+        if (segs[1] !== companyId || segs.length < 5) return
+        const billId = segs[3]
+        if (!paymentsByBill[billId]) paymentsByBill[billId] = []
+        paymentsByBill[billId].push({ id: d.id, ...d.data() } as Payment)
       })
+      recalc(paymentsByBill)
     })
 
     getDoc(doc(db, "companies", companyId)).then((compSnap) => {
@@ -109,7 +112,7 @@ export default function CompanyDetailPage() {
       }
     })
 
-    return () => { destroyed = true; unsubBills(); unsubPayments.forEach((u) => u()) }
+    return () => { destroyed = true; unsubBills(); unsubPayments() }
   }, [user, companyId])
 
   function resetBillForm() {

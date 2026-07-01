@@ -3,7 +3,7 @@
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { collection, collectionGroup, onSnapshot } from "firebase/firestore"
+import { collection, collectionGroup, onSnapshot, query, orderBy, limit as fsLimit } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
 import PullToRefresh from "@/components/PullToRefresh"
@@ -55,11 +55,15 @@ export default function DashboardPage() {
       }
     }
 
-    const unsubCompanies = onSnapshot(collection(db, "companies"), (snap) => {
-      companiesData.length = 0
-      snap.forEach((d) => companiesData.push({ id: d.id, ...d.data() } as Company))
-      recompute()
-    }, (err) => { console.error(err); setDataLoading(false) })
+    const unsubCompanies = onSnapshot(
+      query(collection(db, "companies"), orderBy("createdAt", "desc"), fsLimit(100)),
+      (snap) => {
+        companiesData.length = 0
+        snap.forEach((d) => companiesData.push({ id: d.id, ...d.data() } as Company))
+        recompute()
+      },
+      (err) => { console.error(err); setDataLoading(false) },
+    )
 
     const unsubBills = onSnapshot(collectionGroup(db, "bills"), (snap) => {
       billAmountByPath = {}

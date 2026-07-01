@@ -57,7 +57,7 @@ test.describe("Seed database with sample data", () => {
     await page.setViewportSize({ width: 390, height: 844 })
     // 1. Sign in
     await page.goto("/")
-    await page.fill('input[placeholder="Email"]', EMAIL)
+    await page.fill('input[placeholder="Email address"]', EMAIL)
     await page.fill('input[placeholder="Password"]', PASSWORD)
     await page.click('button[type="submit"]:has-text("Sign in")')
 

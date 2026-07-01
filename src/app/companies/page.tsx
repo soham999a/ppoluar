@@ -2,11 +2,13 @@
 
 import { useAuth } from "@/context/AuthContext"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { collection, collectionGroup, doc, onSnapshot, addDoc, updateDoc, serverTimestamp, orderBy, query } from "firebase/firestore"
+import { useEffect, useState, useMemo, useCallback } from "react"
+import { collection, collectionGroup, doc, onSnapshot, addDoc, updateDoc, serverTimestamp, orderBy, query, limit as fsLimit } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
 import { FiPlus, FiChevronRight, FiChevronDown, FiX, FiTruck, FiDollarSign, FiAlertCircle, FiCheckCircle, FiClock, FiEdit2 } from "react-icons/fi"
+
+const PAGE_SIZE = 200
 
 interface Company {
   id: string
@@ -81,60 +83,77 @@ export default function CompaniesPage() {
     if (!user) return
 
     let destroyed = false
-    const financeByCompany: Record<string, { totalBilled: number; totalPaid: number }> = {}
-    const billsMap: Record<string, Bill[]> = {}
-    const paymentsMap: Record<string, Payment[]> = {}
-    let paymentsList: Payment[] = []
+    const data: {
+      companiesList: Company[]
+      financeByCompany: Record<string, { totalBilled: number; totalPaid: number }>
+      billsMap: Record<string, Bill[]>
+      paymentsMap: Record<string, Payment[]>
+      paymentsList: Payment[]
+    } = {
+      companiesList: [],
+      financeByCompany: {},
+      billsMap: {},
+      paymentsMap: {},
+      paymentsList: [],
+    }
 
     function recompute() {
       if (destroyed) return
-      setCompanyFinance({ ...financeByCompany })
-      setBillsByCompany({ ...billsMap })
-      setPaymentsByBill({ ...paymentsMap })
-      setRecentPayments([...paymentsList])
+      setCompanies(data.companiesList)
+      setCompanyFinance({ ...data.financeByCompany })
+      setBillsByCompany({ ...data.billsMap })
+      setPaymentsByBill({ ...data.paymentsMap })
+      setRecentPayments([...data.paymentsList])
       setDataLoading(false)
     }
 
-    const unsubCompanies = onSnapshot(query(collection(db, "companies"), orderBy("createdAt")), (snap) => {
-      setCompanies(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Company)))
-    })
+    const unsubCompanies = onSnapshot(
+      query(collection(db, "companies"), orderBy("createdAt"), fsLimit(PAGE_SIZE)),
+      (snap) => {
+        data.companiesList = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Company))
+        recompute()
+      },
+    )
 
     const unsubBills = onSnapshot(collectionGroup(db, "bills"), (snap) => {
-      financeByCompany["_totalBills"] = { totalBilled: 0, totalPaid: 0 }
-      Object.keys(billsMap).forEach((k) => delete billsMap[k])
+      data.financeByCompany = {}
+      data.billsMap = {}
+      data.financeByCompany._totalBills = { totalBilled: 0, totalPaid: 0 }
       snap.forEach((d) => {
         const pathSegments = d.ref.path.split("/")
+        if (pathSegments.length < 4) return
         const companyId = pathSegments[1]
         const amount = Number(d.data().amount) || 0
-        if (!financeByCompany[companyId]) financeByCompany[companyId] = { totalBilled: 0, totalPaid: 0 }
-        financeByCompany[companyId].totalBilled += amount
-        financeByCompany["_totalBills"].totalBilled += amount
-        if (!billsMap[companyId]) billsMap[companyId] = []
-        billsMap[companyId].push({ id: d.id, companyId, ...d.data() } as Bill)
+        if (!data.financeByCompany[companyId]) data.financeByCompany[companyId] = { totalBilled: 0, totalPaid: 0 }
+        data.financeByCompany[companyId].totalBilled += amount
+        data.financeByCompany._totalBills.totalBilled += amount
+        if (!data.billsMap[companyId]) data.billsMap[companyId] = []
+        data.billsMap[companyId].push({ id: d.id, companyId, ...d.data() } as Bill)
       })
       recompute()
-    }, (err) => { console.error("Bills listener error:", err); setDataLoading(false) })
+    }, (err) => { console.error("Bills error:", err); setDataLoading(false) })
 
     const unsubPayments = onSnapshot(collectionGroup(db, "payments"), (snap) => {
-      financeByCompany["_totalPaid"] = { totalBilled: 0, totalPaid: 0 }
-      Object.keys(paymentsMap).forEach((k) => delete paymentsMap[k])
-      paymentsList = []
+      data.financeByCompany._totalPaid = { totalBilled: 0, totalPaid: 0 }
+      Object.keys(data.paymentsMap).forEach((k) => delete data.paymentsMap[k])
+      data.paymentsList = []
       snap.forEach((d) => {
         const pathSegments = d.ref.path.split("/")
+        if (pathSegments.length < 5) return
         const companyId = pathSegments[1]
         const billId = pathSegments[3]
         const amount = Number(d.data().amount) || 0
-        if (!financeByCompany[companyId]) financeByCompany[companyId] = { totalBilled: 0, totalPaid: 0 }
-        financeByCompany[companyId].totalPaid += amount
-        financeByCompany["_totalPaid"].totalPaid += amount
+        if (!data.financeByCompany[companyId]) data.financeByCompany[companyId] = { totalBilled: 0, totalPaid: 0 }
+        data.financeByCompany[companyId].totalPaid += amount
+        data.financeByCompany._totalPaid.totalPaid += amount
         const key = `${companyId}__${billId}`
-        if (!paymentsMap[key]) paymentsMap[key] = []
-        paymentsMap[key].push({ id: d.id, companyId, billId, ...d.data() } as Payment)
-        paymentsList.push({ id: d.id, companyId, billId, ...d.data() } as Payment)
+        if (!data.paymentsMap[key]) data.paymentsMap[key] = []
+        data.paymentsMap[key].push({ id: d.id, companyId, billId, ...d.data() } as Payment)
+        data.paymentsList.push({ id: d.id, companyId, billId, ...d.data() } as Payment)
       })
-      paymentsList.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0))
+      data.paymentsList.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0))
       recompute()
-    }, (err) => { console.error("Payments listener error:", err); setDataLoading(false) })
+    }, (err) => { console.error("Payments error:", err); setDataLoading(false) })
 
     return () => { destroyed = true; unsubCompanies(); unsubBills(); unsubPayments() }
   }, [user])
@@ -238,38 +257,51 @@ export default function CompaniesPage() {
     setShowBillForm(bill.companyId)
   }
 
-  function getCompanyFinance(companyId: string) {
+  const getCompanyFinance = useCallback((companyId: string) => {
     return companyFinance[companyId] || { totalBilled: 0, totalPaid: 0 }
-  }
+  }, [companyFinance])
 
-  function getPaymentStatus(finance: { totalBilled: number; totalPaid: number }) {
+  const getPaymentStatus = useCallback((finance: { totalBilled: number; totalPaid: number }) => {
     if (finance.totalBilled === 0) return { label: "No Bills", color: "bg-slate-100 text-slate-500" }
     const balance = finance.totalBilled - finance.totalPaid
     if (balance <= 0) return { label: "Paid", color: "bg-green-100 text-green-700" }
     if (finance.totalPaid > 0) return { label: "Partial", color: "bg-yellow-100 text-yellow-700" }
     return { label: "Pending", color: "bg-red-100 text-red-700" }
-  }
+  }, [])
 
-  function getBillPayments(billId: string, companyId: string): Payment[] {
+  const getBillPayments = useCallback((billId: string, companyId: string): Payment[] => {
     return paymentsByBill[`${companyId}__${billId}`] || []
-  }
+  }, [paymentsByBill])
 
-  const totals = companyFinance["_totalBills"]
-  const totalPaidAgg = companyFinance["_totalPaid"]
-  const totalBilled = totals?.totalBilled || 0
-  const totalPaid = totalPaidAgg?.totalPaid || 0
-  const outstandingBalance = totalBilled - totalPaid
-  const pendingBillsCount = companies.reduce((count, c) => {
-    const f = getCompanyFinance(c.id)
-    return count + (f.totalBilled > 0 && f.totalBilled - f.totalPaid > 0 ? 1 : 0)
-  }, 0)
+  const {
+    totalBilled, totalPaid, outstandingBalance, pendingBillsCount,
+  } = useMemo(() => {
+    const totals = companyFinance._totalBills
+    const paidAgg = companyFinance._totalPaid
+    const billed = totals?.totalBilled || 0
+    const paid = paidAgg?.totalPaid || 0
+    let pending = 0
+    for (let i = 0; i < companies.length; i++) {
+      const f = companyFinance[companies[i].id]
+      if (f && f.totalBilled > 0 && f.totalBilled - f.totalPaid > 0) pending++
+    }
+    return {
+      totalBilled: billed,
+      totalPaid: paid,
+      outstandingBalance: billed - paid,
+      pendingBillsCount: pending,
+    }
+  }, [companyFinance, companies])
 
-  function getAvailableBills(companyId: string) {
+  const getAvailableBills = useCallback((companyId: string) => {
     return (billsByCompany[companyId] || []).filter((b) => {
-      const paid = getBillPayments(b.id, companyId).reduce((s, p) => s + (Number(p.amount) || 0), 0)
+      const key = `${companyId}__${b.id}`
+      const payments = paymentsByBill[key] || []
+      let paid = 0
+      for (let i = 0; i < payments.length; i++) paid += Number(payments[i].amount) || 0
       return (Number(b.amount) || 0) - paid > 0
     })
-  }
+  }, [billsByCompany, paymentsByBill])
 
   if (loading || !user) return null
 
