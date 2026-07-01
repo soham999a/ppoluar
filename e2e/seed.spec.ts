@@ -85,8 +85,8 @@ test.describe("Seed database with sample data", () => {
       await page.click('button[type="submit"]:has-text("Save")')
       await page.waitForTimeout(1500)
 
-      // Verify company appears in list
-      await expect(page.locator(`a:has-text("${company.name}")`).first()).toBeVisible()
+      // Verify company appears in table
+      await expect(page.locator(`text="${company.name}"`).first()).toBeVisible()
       console.log(`✓ Added company: ${company.name}`)
     }
 
@@ -95,8 +95,8 @@ test.describe("Seed database with sample data", () => {
       await page.goto("/companies")
       await page.waitForTimeout(1000)
 
-      // Click on company name link
-      await page.click(`a:has-text("${company.name}")`)
+      // Click on company row to expand
+      await page.locator(`text="${company.name}"`).first().click()
       await page.waitForTimeout(1500)
 
       const bills = billsData[company.name]
@@ -126,19 +126,15 @@ test.describe("Seed database with sample data", () => {
         // Add payments for this bill (if any)
         const billPayments = payments[i]
         if (billPayments && billPayments.length > 0) {
-          // Expand bill to see payments
-          await page.locator(`text="${bill.billNumber}"`).first().click()
-          await page.waitForTimeout(500)
-
           for (const payment of billPayments) {
-            await page.click('button:has-text("Add Payment")')
+            await page.click('text=+ Add Payment')
             await page.waitForTimeout(500)
 
             await page.fill('input[placeholder="Cash, Bank Transfer, etc."]', payment.mode)
             const paymentDateInput = page.locator('input[type="date"]').first()
             await paymentDateInput.fill(payment.date)
             await page.fill('input[placeholder="Bank account name"]', payment.account)
-            await page.fill('input[placeholder="Amount"]', payment.amount)
+            await page.fill('input[placeholder="0"]', payment.amount)
 
             await page.click('button[type="submit"]:has-text("Save")')
             await page.waitForTimeout(1500)

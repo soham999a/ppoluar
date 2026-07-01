@@ -71,34 +71,36 @@ export default function CompanyDetailPage() {
   useEffect(() => {
     if (!user || !companyId) return
     let destroyed = false
+    const unsubPayments: (() => void)[] = []
 
-    async function loadPayments(billList: Bill[]) {
-      const payResults = await Promise.all(
-        billList.map(async (bill) => {
-          const paySnap = await getDocs(collection(db, "companies", companyId, "bills", bill.id, "payments"))
-          return { billId: bill.id, payments: paySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment)) }
-        }),
-      )
+    function recalcPending(billList: Bill[], paymentsMap: Record<string, Payment[]>) {
       let pending = 0
-      const paymentsMap: Record<string, Payment[]> = {}
-      for (const r of payResults) {
-        paymentsMap[r.billId] = r.payments
-        const bill = billList.find((b) => b.id === r.billId)
-        const billAmt = Number(bill?.amount) || 0
-        const paid = r.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+      for (const bill of billList) {
+        const billAmt = Number(bill.amount) || 0
+        const paid = (paymentsMap[bill.id] || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
         pending += billAmt - paid
       }
-      if (!destroyed) {
-        setPayments(paymentsMap)
-        setTotalPending(pending)
-      }
+      if (!destroyed) setTotalPending(pending)
     }
 
-    const unsub = onSnapshot(collection(db, "companies", companyId, "bills"), (snap) => {
+    const unsubBills = onSnapshot(collection(db, "companies", companyId, "bills"), (snap) => {
       const billList = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bill))
       setBills(billList)
-      loadPayments(billList)
       setDataLoading(false)
+
+      unsubPayments.forEach((u) => u())
+      unsubPayments.length = 0
+
+      const paymentsMap: Record<string, Payment[]> = {}
+      billList.forEach((bill) => {
+        paymentsMap[bill.id] = []
+        const unsub = onSnapshot(collection(db, "companies", companyId, "bills", bill.id, "payments"), (paySnap) => {
+          paymentsMap[bill.id] = paySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment))
+          setPayments({ ...paymentsMap })
+          recalcPending(billList, paymentsMap)
+        })
+        unsubPayments.push(unsub)
+      })
     })
 
     getDoc(doc(db, "companies", companyId)).then((compSnap) => {
@@ -107,7 +109,7 @@ export default function CompanyDetailPage() {
       }
     })
 
-    return () => { destroyed = true; unsub() }
+    return () => { destroyed = true; unsubBills(); unsubPayments.forEach((u) => u()) }
   }, [user, companyId])
 
   function resetBillForm() {
