@@ -6,6 +6,7 @@ import { useEffect, useState } from "react"
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy, limit as fsLimit } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
+import Pagination from "@/components/Pagination"
 import PullToRefresh from "@/components/PullToRefresh"
 import jsPDF from "jspdf"
 import { FiDownload, FiEye, FiTrash2, FiX, FiTruck, FiMapPin } from "react-icons/fi"
@@ -139,6 +140,8 @@ export default function QuotationPage() {
   const router = useRouter()
   const [quotations, setQuotations] = useState<Quotation[]>([])
   const [dataLoading, setDataLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const DISPLAY_PAGE_SIZE = 15
   const [detailQuotation, setDetailQuotation] = useState<Quotation | null>(null)
   const [form, setForm] = useState({
     from: "", to: "", truckFreight: "", truckCategory: "", detention: "",
@@ -279,10 +282,12 @@ export default function QuotationPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {quotations.length === 0 ? (
-                      <tr><td colSpan={4} className="text-center py-8 text-slate-400">No quotations yet.</td></tr>
-                    ) : (
-                      quotations.map((q) => (
+                      {quotations.length === 0 ? (
+                        <tr><td colSpan={4} className="text-center py-8 text-slate-400">No quotations yet.</td></tr>
+                      ) : (
+                        (() => {
+                          const start = (page - 1) * DISPLAY_PAGE_SIZE
+                          return quotations.slice(start, start + DISPLAY_PAGE_SIZE).map((q) => (
                         <tr key={q.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors">
                           <td className="py-3 px-4 font-medium text-slate-900">{q.from || "?"} → {q.to || "?"}</td>
                           <td className="py-3 px-4 text-slate-600">₹{(Number(q.truckFreight) || 0).toLocaleString()}</td>
@@ -314,10 +319,15 @@ export default function QuotationPage() {
                           </td>
                         </tr>
                       ))
+                        })()
                     )}
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            <div className="hidden lg:block">
+              <Pagination currentPage={page} totalPages={Math.ceil(quotations.length / DISPLAY_PAGE_SIZE) || 1} onPageChange={setPage} />
             </div>
 
             <div className="block lg:hidden space-y-3">
@@ -326,7 +336,9 @@ export default function QuotationPage() {
                   <p className="text-sm text-slate-400">No quotations yet.</p>
                 </div>
               ) : (
-                quotations.map((q) => (
+                (() => {
+                  const start = (page - 1) * DISPLAY_PAGE_SIZE
+                  return quotations.slice(start, start + DISPLAY_PAGE_SIZE).map((q) => (
                   <div key={q.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
                     <div className="flex items-center justify-between mb-2">
                       <h3 className="font-semibold text-slate-900 text-sm">{q.from || "?"} → {q.to || "?"}</h3>
@@ -356,7 +368,9 @@ export default function QuotationPage() {
                     </div>
                   </div>
                 ))
+                  })()
               )}
+              <Pagination currentPage={page} totalPages={Math.ceil(quotations.length / DISPLAY_PAGE_SIZE) || 1} onPageChange={setPage} />
             </div>
           </>
         )}

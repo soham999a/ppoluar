@@ -6,9 +6,11 @@ import { useEffect, useState, useMemo, useCallback } from "react"
 import { collection, collectionGroup, doc, onSnapshot, addDoc, updateDoc, serverTimestamp, orderBy, query, limit as fsLimit } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
+import Pagination from "@/components/Pagination"
 import { FiPlus, FiChevronRight, FiChevronDown, FiX, FiTruck, FiDollarSign, FiAlertCircle, FiCheckCircle, FiClock, FiEdit2 } from "react-icons/fi"
 
 const PAGE_SIZE = 200
+const DISPLAY_PAGE_SIZE = 15
 
 interface Company {
   id: string
@@ -74,6 +76,9 @@ export default function CompaniesPage() {
 
   const [expandedSection, setExpandedSection] = useState<string | null>(null)
   const [recentPayments, setRecentPayments] = useState<Payment[]>([])
+  const [page, setPage] = useState(1)
+  const companiesStart = (page - 1) * DISPLAY_PAGE_SIZE
+  const companiesToShow = companies.slice(companiesStart, companiesStart + DISPLAY_PAGE_SIZE)
 
   useEffect(() => {
     if (!loading && !user) router.replace("/")
@@ -579,7 +584,7 @@ export default function CompaniesPage() {
                       <tr><td colSpan={8} className="text-center py-8 text-slate-400">No companies yet. Click "Add Company" to create your first one.</td></tr>
                     </tbody>
                   ) : (
-                    companies.map((c) => {
+                    companiesToShow.map((c) => {
                       const finance = getCompanyFinance(c.id)
                       const balance = finance.totalBilled - finance.totalPaid
                       const status = getPaymentStatus(finance)
@@ -740,6 +745,7 @@ export default function CompaniesPage() {
                   )}
                 </table>
               </div>
+              <Pagination currentPage={page} totalPages={Math.ceil(companies.length / DISPLAY_PAGE_SIZE) || 1} onPageChange={setPage} />
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">

@@ -6,6 +6,7 @@ import { useEffect, useState, useMemo } from "react"
 import { doc, getDoc, collection, collectionGroup, onSnapshot, addDoc, updateDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import Sidebar from "@/components/Sidebar"
+import Pagination from "@/components/Pagination"
 import Link from "next/link"
 import { FiArrowLeft, FiPlus, FiEdit2, FiChevronDown, FiChevronRight, FiX } from "react-icons/fi"
 
@@ -65,6 +66,8 @@ export default function CompanyDetailPage() {
 
   const [dataLoading, setDataLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [page, setPage] = useState(1)
+  const DISPLAY_PAGE_SIZE = 10
 
   useEffect(() => {
     if (!loading && !user) router.replace("/")
@@ -338,7 +341,9 @@ export default function CompanyDetailPage() {
               <p className="text-sm text-slate-400">No bills yet. Add one to get started.</p>
             </div>
           ) : (
-            bills.map((bill) => {
+            (() => {
+              const start = (page - 1) * DISPLAY_PAGE_SIZE
+              return bills.slice(start, start + DISPLAY_PAGE_SIZE).map((bill) => {
               const billPayments = payments[bill.id] || []
               const billAmt = Number(bill.amount) || 0
               const paidAmt = billPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
@@ -503,8 +508,10 @@ export default function CompanyDetailPage() {
                 </div>
               )
             })
+              })()
           )}
         </div>
+        <Pagination currentPage={page} totalPages={Math.ceil(bills.length / DISPLAY_PAGE_SIZE) || 1} onPageChange={setPage} />
       </main>
     </div>
   )
